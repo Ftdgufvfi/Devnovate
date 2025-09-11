@@ -1,6 +1,6 @@
 // AI Service for communicating with backend AI API
 class AIService {
-  private baseURL = process.env.NODE_ENV === 'development' ? '/api' : (process.env.REACT_APP_API_URL || 'http://localhost:5000/api');
+  private baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
   async generateFromCanvas(canvasState: any, outputType: string, customPrompt?: string) {
     try {

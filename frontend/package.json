@@ -51,6 +51,5 @@
     "@types/jest": "^27.5.2",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32"
-  },
-  "proxy": "http://localhost:5000"
+  }
 }

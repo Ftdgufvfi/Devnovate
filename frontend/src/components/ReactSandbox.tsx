@@ -462,7 +462,7 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
       }
     } catch (error) {
       console.error('Failed to start conversation:', error);
-      alert('Failed to start AI conversation. Please check if backend is running on http://localhost:5000');
+      alert('Failed to start AI conversation. Please check your internet connection and try again.');
     } finally {
       setIsAIGenerating(false);
     }
@@ -634,12 +634,12 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
       // Add error message to conversation history
       setConversationHistory(prev => [...prev, {
         role: 'assistant' as const,
-        content: `❌ Error: Failed to get AI response. Please check if the backend server is running and try again.`,
+        content: `❌ Error: Failed to get AI response. Please check your internet connection and try again.`,
         timestamp: new Date(),
         type: 'error_report' as const
       }]);
       
-      alert('Failed to continue conversation. Please check if the backend server is running on http://localhost:5000');
+      alert('Failed to continue conversation. Please check your internet connection and try again.');
     } finally {
       setIsAIGenerating(false);
     }
