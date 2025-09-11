@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: ai-website-builder-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: DATABASE_URL
+        value: ./database.sqlite
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+      - key: MAX_FILE_SIZE
+        value: 5242880
+      # These will be set manually in Render dashboard for security
+      # - key: AZURE_OPENAI_API_KEY
+      # - key: OPENAI_API_KEY
+      # - key: CORS_ORIGINS
