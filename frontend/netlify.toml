@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build"
+  command = "npm install --legacy-peer-deps && npm run build --verbose"
   publish = "build"
 
 [build.environment]
@@ -7,6 +7,9 @@
   NODE_VERSION = "18"
   CI = "false"
   SKIP_PREFLIGHT_CHECK = "true"
+  DISABLE_ESLINT_PLUGIN = "true"
+  GENERATE_SOURCEMAP = "false"
+  npm_config_loglevel = "error"
 
 [[redirects]]
   from = "/*"
