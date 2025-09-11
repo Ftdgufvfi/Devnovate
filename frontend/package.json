@@ -2,7 +2,6 @@
   "name": "ai-website-builder-frontend",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://ftdgufvfi.github.io/Devnovate",
   "dependencies": {
     "@babel/standalone": "^7.28.4",
     "@monaco-editor/react": "^4.6.0",

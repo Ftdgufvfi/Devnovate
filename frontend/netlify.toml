@@ -1,7 +1,7 @@
 [build]
   base = "frontend"
   command = "npm install --legacy-peer-deps && npm run build --verbose"
-  publish = "frontend/build"
+  publish = "build"
 
 [build.environment]
   REACT_APP_API_URL = "https://ai-enhance-rlux.onrender.com/api"
