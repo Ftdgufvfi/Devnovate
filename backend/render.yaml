@@ -3,8 +3,21 @@ services:
     name: ai-website-builder-backend
     env: node
     plan: free
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: |
+      echo "=== Installing dependencies ==="
+      npm install
+      echo "=== Building application ==="
+      npm run build
+      echo "=== Verifying build output ==="
+      pwd
+      ls -la
+      ls -la dist/
+      echo "=== Build complete ==="
+    startCommand: |
+      echo "=== Starting application ==="
+      pwd
+      ls -la dist/
+      node dist/index.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

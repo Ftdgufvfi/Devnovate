@@ -10,17 +10,18 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for build)
+# Install all dependencies for build
 RUN npm ci
 
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the application (TypeScript compilation)
 RUN npm run build
 
-# Remove dev dependencies to reduce image size
-RUN npm prune --production
+# Clean up: Remove source files and keep only compiled output
+RUN rm -rf src/ && \
+    npm prune --production
 
 # Expose port
 EXPOSE 5000

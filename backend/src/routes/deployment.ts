@@ -23,7 +23,7 @@ router.post('/deploy', (req, res) => {
     });
   } catch (error) {
     console.error('Error deploying project:', error);
-    res.status(500).json({ error: 'Failed to deploy project' });
+    return res.status(500).json({ error: 'Failed to deploy project' });
   }
 });
 

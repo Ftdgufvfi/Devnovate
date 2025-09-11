@@ -33,7 +33,7 @@ router.post('/register', (req, res) => {
     });
   } catch (error) {
     console.error('Error registering user:', error);
-    res.status(500).json({ error: 'Failed to register user' });
+    return res.status(500).json({ error: 'Failed to register user' });
   }
 });
 
@@ -66,13 +66,13 @@ router.post('/login', (req, res) => {
         token
       });
     } else {
-      res.status(401).json({ 
+      return res.status(401).json({ 
         error: 'Invalid email or password' 
       });
     }
   } catch (error) {
     console.error('Error logging in user:', error);
-    res.status(500).json({ error: 'Failed to login' });
+    return res.status(500).json({ error: 'Failed to login' });
   }
 });
 
