@@ -25,7 +25,7 @@ router.post('/register', (req, res) => {
     // Mock JWT token
     const token = 'mock-jwt-token-' + Date.now();
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'User registered successfully',
       user,
@@ -59,7 +59,7 @@ router.post('/login', (req, res) => {
 
       const token = 'mock-jwt-token-' + Date.now();
 
-      res.json({
+      return res.json({
         success: true,
         message: 'Login successful',
         user,

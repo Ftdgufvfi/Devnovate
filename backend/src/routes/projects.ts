@@ -59,7 +59,7 @@ router.post('/', (req, res) => {
       isPublished: false
     };
 
-    res.status(201).json({ project: newProject });
+    return res.status(201).json({ project: newProject });
   } catch (error) {
     console.error('Error creating project:', error);
     return res.status(500).json({ error: 'Failed to create project' });

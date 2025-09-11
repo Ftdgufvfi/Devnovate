@@ -14,7 +14,7 @@ router.post('/deploy', (req, res) => {
     // Mock deployment process
     const deploymentUrl = `https://${projectId}-${Math.random().toString(36).substring(7)}.${platform}.app`;
     
-    res.json({
+    return res.json({
       success: true,
       deploymentUrl,
       platform,
