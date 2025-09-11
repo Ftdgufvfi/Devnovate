@@ -9,15 +9,27 @@ router.get('/test', (req, res) => {
   res.json({ message: 'AI routes are working!', timestamp: new Date().toISOString() });
 });
 
-// Initialize Azure OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.AZURE_OPENAI_API_KEY,
-  baseURL: 'https://chevvurikarthik.cognitiveservices.azure.com/openai/deployments/gpt-4.1',
-  defaultQuery: { 'api-version': '2024-12-01-preview' },
-  defaultHeaders: {
-    'api-key': process.env.AZURE_OPENAI_API_KEY,
-  },
-});
+// Initialize Azure OpenAI client with lazy initialization
+let openai: OpenAI;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    const apiKey = process.env.AZURE_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('Azure OpenAI API key is required. Please set AZURE_OPENAI_API_KEY in your .env file.');
+    }
+    
+    openai = new OpenAI({
+      apiKey: apiKey,
+      baseURL: 'https://chevvurikarthik.cognitiveservices.azure.com/openai/deployments/gpt-4.1',
+      defaultQuery: { 'api-version': '2024-12-01-preview' },
+      defaultHeaders: {
+        'api-key': apiKey,
+      },
+    });
+  }
+  return openai;
+}
 
 // Types for canvas state
 interface ComponentPosition {
@@ -108,7 +120,7 @@ router.post('/generate-from-canvas', validateCanvasRequest, async (req: Request,
     console.log('Canvas components count:', canvasState.components.length);
 
     // Call Azure OpenAI API with enhanced prompt for conversational response
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: "gpt-4", // Using the deployment name
       messages: [
         {
@@ -208,7 +220,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       userPrompt += `\n\nContext: ${context}`;
     }
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: "gpt-4",
       messages: [
         {
@@ -279,7 +291,7 @@ Please provide:
 
 Focus on practical, actionable advice.`;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: "gpt-4",
       messages: [
         {
@@ -351,12 +363,12 @@ router.post('/conversation/start', async (req: Request, res: Response) => {
     // Generate initial React code from canvas state
     const prompt = generatePrompt(canvasState, outputType, 'Generate a React component based on this canvas design. Make it clean, modern, and production-ready.');
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: getSystemPrompt(outputType) + "\n\nThis is the start of a conversation thread. Generate ONLY JSX elements for the canvas components - NO headers, page structure, or wrapper containers. PRESERVE ALL existing positions, sizes, and styles from the canvas state. Return only the specific UI elements (buttons, text, images) that match the canvas design with EXACT positioning and styling. The user will be able to modify this code and ask questions about it in follow-up messages."
+          content: getSystemPrompt(outputType) + "\n\nThis is the start of a conversation thread. Generate ONLY JSX elements for the canvas components - NO headers, page structure, or wrapper containers. When the user asks to change positioning, sizing, or layout, FOLLOW their specific instructions. Only preserve original canvas values for properties the user doesn't specifically want to change. Return only the specific UI elements (buttons, text, images) that match the design requirements."
         },
         {
           role: "user",
@@ -475,19 +487,22 @@ router.post('/conversation/continue', async (req: Request, res: Response) => {
       }
     }
     
+    // Generate dynamic preservation instructions based on user intent
+    canvasPreservationData = generatePreservationInstructions(message, !!(canvasToUse && canvasToUse.components && canvasToUse.components.length > 0));
+    
     if (canvasToUse && canvasToUse.components && canvasToUse.components.length > 0) {
-      canvasPreservationData = '\n\n🎯 ORIGINAL CANVAS STATE (PRESERVE THESE VALUES):\n';
+      canvasPreservationData += '\n\nCURRENT CANVAS COMPONENTS:\n';
       canvasToUse.components.forEach((component: CanvasComponent, index: number) => {
         canvasPreservationData += `\n${index + 1}. ${component.type} Component:\n`;
         
         // Position data from canvas
         if (component.position?.xPercent !== undefined && component.position?.yPercent !== undefined) {
-          canvasPreservationData += `   - EXACT Position: left: ${component.position.xPercent}%, top: ${component.position.yPercent}%\n`;
+          canvasPreservationData += `   - Current Position: left: ${component.position.xPercent}%, top: ${component.position.yPercent}%\n`;
         }
         
         // Size data from canvas
         if (component.width || component.height) {
-          canvasPreservationData += `   - EXACT Size: width: ${component.width}px, height: ${component.height}px\n`;
+          canvasPreservationData += `   - Current Size: width: ${component.width}px, height: ${component.height}px\n`;
         }
         
         // Props from canvas
@@ -536,7 +551,7 @@ router.post('/conversation/continue', async (req: Request, res: Response) => {
     // Prepare messages for OpenAI (limit to last 10 messages to avoid token limits)
     const recentMessages = thread.messages.slice(-10);
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: "gpt-4",
       messages: recentMessages.map(msg => ({
         role: msg.role,
@@ -715,7 +730,45 @@ NEVER change positions, sizes, or core styling - only enhance what exists.`;
   }
 }
 
-// Generate detailed prompt from canvas state
+// Detect if user is requesting specific layout/position/size changes
+function detectLayoutChangeRequest(message: string): boolean {
+  const layoutKeywords = [
+    'move', 'position', 'relocate', 'place',
+    'size', 'resize', 'bigger', 'smaller', 'larger', 'wider', 'taller', 'height', 'width',
+    'length', 'increase', 'decrease', 'expand', 'shrink',
+    'left', 'right', 'top', 'bottom', 'center', 'middle',
+    'align', 'spacing', 'margin', 'padding',
+    'layout', 'arrange', 'rearrange', 'reposition'
+  ];
+  
+  const lowerMessage = message.toLowerCase();
+  return layoutKeywords.some(keyword => lowerMessage.includes(keyword));
+}
+
+// Generate dynamic preservation instructions based on user intent
+function generatePreservationInstructions(userMessage: string, hasCanvasState: boolean): string {
+  if (!hasCanvasState) {
+    return '';
+  }
+  
+  const isLayoutChangeRequest = detectLayoutChangeRequest(userMessage);
+  
+  if (isLayoutChangeRequest) {
+    return `\n\n🔄 USER LAYOUT CHANGE REQUEST DETECTED:\n` +
+           `- The user wants to modify positioning, sizing, or layout\n` +
+           `- FOLLOW the user's specific instructions for changes\n` +
+           `- ONLY preserve original values for properties NOT mentioned by the user\n` +
+           `- If user asks to move something, change the position accordingly\n` +
+           `- If user asks to resize something, change the size accordingly\n` +
+           `- PRIORITY: User requests > Original canvas preservation\n`;
+  } else {
+    return `\n\n🎯 PRESERVE ORIGINAL CANVAS STATE:\n` +
+           `- Keep EXACT positions: Use original xPercent and yPercent values\n` +
+           `- Keep EXACT sizes: Use original width and height values\n` +
+           `- Preserve ALL existing styles and properties\n` +
+           `- Only modify what the user specifically requests to change\n`;
+  }
+}
 function generatePrompt(canvasState: CanvasState, outputType: string, customPrompt?: string): string {
   const { components, pageTitle, theme } = canvasState;
   
@@ -734,45 +787,38 @@ function generatePrompt(canvasState: CanvasState, outputType: string, customProm
   components.forEach((component, index) => {
     prompt += `\n${index + 1}. ${component.type} Component:\n`;
     
-    // Detailed position information
+    // Position information
     if (component.position?.xPercent !== undefined && component.position?.yPercent !== undefined) {
-      prompt += `   - EXACT Position (MUST PRESERVE): left: ${component.position.xPercent}%, top: ${component.position.yPercent}%\n`;
+      prompt += `   - Current Position: left: ${component.position.xPercent}%, top: ${component.position.yPercent}%\n`;
     } else {
       prompt += `   - Position: top-left (default)\n`;
     }
     
-    // Detailed size information
+    // Size information
     if (component.width || component.height) {
-      prompt += `   - EXACT Size (MUST PRESERVE): width: ${component.width || 'auto'}px, height: ${component.height || 'auto'}px\n`;
+      prompt += `   - Current Size: width: ${component.width || 'auto'}px, height: ${component.height || 'auto'}px\n`;
     }
     
     // Add component-specific properties
     Object.entries(component.props).forEach(([key, value]) => {
       if (key !== 'width' && key !== 'height' && value !== null && value !== undefined) {
-        prompt += `   - ${key} (PRESERVE EXACTLY): ${value}\n`;
+        prompt += `   - ${key}: ${value}\n`;
       }
     });
     
-    // Detailed style preservation
+    // Style information
     if (component.style && Object.keys(component.style).length > 0) {
-      prompt += `   - EXISTING Custom styles (MUST PRESERVE ALL): ${JSON.stringify(component.style, null, 4)}\n`;
+      prompt += `   - Current Custom styles: ${JSON.stringify(component.style, null, 4)}\n`;
     }
   });
   
-  prompt += `\n🔒 CRITICAL PRESERVATION REQUIREMENTS:\n`;
-  prompt += `- PRESERVE EXACT positions: Use the EXACT xPercent and yPercent values provided\n`;
-  prompt += `- PRESERVE EXACT sizes: Use the EXACT width and height pixel values provided\n`;
-  prompt += `- PRESERVE ALL existing styles: Keep every CSS property from component.style\n`;
-  prompt += `- PRESERVE EXACT text content: Keep all text, labels, and content exactly as specified\n`;
-  prompt += `- PRESERVE component props: Keep all existing properties unchanged\n`;
-  
-  prompt += `\n⚡ ENHANCEMENT RULES:\n`;
+  prompt += `\n� GENERATION GUIDELINES:\n`;
+  prompt += `- Use these component positions and sizes as the STARTING POINT\n`;
   prompt += `- Generate ONLY JSX elements, not complete React components\n`;
   prompt += `- Use HTML tags like <button>, <p>, <div>, <img>, etc. with React props (className, style, onClick)\n`;
-  prompt += `- Use absolute positioning with the EXACT percentage values: style={{ left: 'X%', top: 'Y%' }}\n`;
-  prompt += `- Add Tailwind CSS classes for styling enhancement (className prop) but preserve existing styles\n`;
-  prompt += `- Add ONLY complementary hover effects and transitions - do not change base styling\n`;
-  prompt += `- Make elements responsive and accessible without changing core positioning\n`;
+  prompt += `- Use absolute positioning: style={{ left: 'X%', top: 'Y%' }}\n`;
+  prompt += `- Add Tailwind CSS classes for styling enhancement (className prop)\n`;
+  prompt += `- Make elements responsive and accessible\n`;
   prompt += `- DO NOT include component definitions, imports, exports, or wrapper functions\n`;
   
   prompt += `\n📐 POSITIONING EXAMPLE:\n`;
