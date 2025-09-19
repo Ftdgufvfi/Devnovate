@@ -11,12 +11,23 @@ export {};
 
 interface CanvasProps {
   className?: string;
+  pageId?: string;
+  projectId: string; // Make required instead of optional
 }
 
-const Canvas: React.FC<CanvasProps> = ({ className = '' }) => {
+const Canvas: React.FC<CanvasProps> = ({ className = '', pageId, projectId }) => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [showReactSandbox, setShowReactSandbox] = useState(false);
   const [aiGeneratedCode, setAiGeneratedCode] = useState<any>(null);
+  
+  // Debug logging for Canvas props
+  console.log('Canvas component props:', {
+    pageId,
+    projectId,
+    hasPageId: !!pageId,
+    hasProjectId: !!projectId
+  });
+
   const { 
     currentPage, 
     addComponent, 
@@ -304,6 +315,8 @@ const Canvas: React.FC<CanvasProps> = ({ className = '' }) => {
         onClose={() => setShowReactSandbox(false)}
         components={currentPage?.components || []}
         jsxCode={generateComponentJSX()}
+        pageId={pageId}
+        projectId={projectId}
         onCodeUpdate={(newCode) => {
           setAiGeneratedCode({ main: newCode });
         }}

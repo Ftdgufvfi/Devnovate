@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Copy, Download, ExternalLink, Sparkles, Loader2 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
 import useBuilderStore from '../store/builderStore';
 import ReactSandbox from './ReactSandbox';
 import { aiService } from '../services/aiService';
@@ -10,6 +11,7 @@ interface CodeGeneratorModalProps {
 }
 
 const CodeGeneratorModal: React.FC<CodeGeneratorModalProps> = ({ isOpen, onClose }) => {
+  const { projectId } = useParams<{ projectId: string }>();
   const [activeTab, setActiveTab] = useState<'react' | 'html' | 'css'>('react');
   const [copied, setCopied] = useState(false);
   const [showReactSandbox, setShowReactSandbox] = useState(false);
@@ -770,6 +772,8 @@ ${componentStyles}
         onClose={() => setShowReactSandbox(false)}
         components={currentPage?.components || []}
         jsxCode={generateComponentJSX()}
+        pageId={currentPage?.id}
+        projectId={projectId}
         onCodeUpdate={(newCode) => {
           // Handle code updates from AI enhancement
           console.log('Code updated via AI enhancement:', newCode);

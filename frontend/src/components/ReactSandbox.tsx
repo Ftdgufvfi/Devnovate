@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Play, AlertTriangle, CheckCircle, Sparkles, Loader2, RotateCcw } from 'lucide-react';
+import { X, Play, AlertTriangle, CheckCircle, Sparkles, Loader2, RotateCcw, Download, Save, RefreshCw } from 'lucide-react';
 import { Component } from '../types';
 import { aiService } from '../services/aiService';
+import { useProjectStore } from '../store/projectStore';
+import { projectService } from '../services/projectService';
+import toast from 'react-hot-toast';
 
 // Babel standalone - we'll load it dynamically
 declare global {
@@ -20,6 +23,8 @@ interface ReactSandboxProps {
   onClose: () => void;
   components: Component[];
   jsxCode: string;
+  pageId?: string;
+  projectId?: string;
   onCodeUpdate?: (newCode: string) => void; // Callback to update the code
 }
 
@@ -65,12 +70,41 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
   onClose,
   components,
   jsxCode,
+  pageId,
+  projectId,
   onCodeUpdate
 }) => {
+  // Debug logging for props
+  console.log('ReactSandbox props received:', {
+    isOpen,
+    pageId,
+    projectId,
+    hasJsxCode: !!jsxCode,
+    componentsCount: components?.length || 0,
+    hasOnCodeUpdate: !!onCodeUpdate
+  });
+
+  // Fallback: Extract projectId from URL if prop is undefined
+  const urlProjectId = React.useMemo(() => {
+    const urlParts = window.location.pathname.split('/');
+    
+    // Expected URL format: /builder/:projectId/:pageId
+    if (urlParts[1] === 'builder' && urlParts[2]) {
+      return urlParts[2];
+    }
+    return null;
+  }, []);
+
+  // Use prop projectId or fallback to URL extraction
+  const effectiveProjectId = projectId || urlProjectId;
+
+  const { updatePage, getPage } = useProjectStore();
   const [compiledComponent, setCompiledComponent] = useState<React.ComponentType | null>(null);
   const [compilationError, setCompilationError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
@@ -86,7 +120,7 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
     role: 'user' | 'assistant';
     content: string;
     timestamp: Date;
-    type?: 'conversation' | 'code_update' | 'error_report';
+    type?: 'conversation' | 'code_update' | 'error_report' | 'confirmation';
     code?: string;
     explanation?: string;
     changes?: string[];
@@ -118,6 +152,11 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
     changes: string[];
   } | null>(null);
   const [showChangePreview, setShowChangePreview] = useState(false);
+  const [pendingAIChanges, setPendingAIChanges] = useState<{
+    code: string;
+    explanation: string;
+    changes: string[];
+  } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Compile JSX to React component
@@ -336,15 +375,67 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
     }
   }, [isOpen, currentCode]);
 
+  // Fetch existing React code when component opens (only once)
+  useEffect(() => {
+    const fetchExistingCode = async () => {
+      // Only fetch if:
+      // 1. Component is opening for the first time
+      // 2. We have valid pageId and effectiveProjectId
+      // 3. No active AI conversation (to avoid overriding AI-generated code)
+      // 4. No current code set yet
+      if (isOpen && pageId && effectiveProjectId && !conversationId && !currentCode) {
+        try {
+          // First try to get fresh data from backend
+          const token = localStorage.getItem('token');
+          if (token) {
+            const response = await fetch(`http://localhost:5000/api/projects/${effectiveProjectId}/pages/${pageId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (response.ok) {
+              const page = await response.json();
+              if (page.reactCode) {
+                console.log('Loading React code from backend API:', page.reactCode.substring(0, 100) + '...');
+                setCurrentCode(page.reactCode);
+                return;
+              }
+            }
+          }
+          
+          // Fallback to store data
+          const { currentProject } = useProjectStore.getState();
+          if (currentProject) {
+            const page = currentProject.pages.find((p: any) => p.id === pageId);
+            if (page && page.reactCode) {
+              console.log('Loading existing React code from store:', page.reactCode.substring(0, 100) + '...');
+              setCurrentCode(page.reactCode);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching existing React code:', error);
+        }
+        
+        // Final fallback to jsxCode prop if no saved code found
+        if (jsxCode) {
+          console.log('No saved React code found, using fallback jsxCode');
+          setCurrentCode(jsxCode);
+        }
+      }
+    };
+
+    fetchExistingCode();
+  }, [isOpen, pageId, effectiveProjectId]); // Updated dependency
+
   // Debug: Log when conversationId (threadId) changes and persist to session storage
   useEffect(() => {
-    console.log('ReactSandbox threadId changed:', conversationId);
     if (conversationId) {
-      console.log('Thread is active with ID:', conversationId);
       // Persist conversation ID to session storage
       sessionStorage.setItem('ai-conversation-id', conversationId);
     } else {
-      console.log('No active thread');
       // Clear from session storage when conversation ends
       sessionStorage.removeItem('ai-conversation-id');
     }
@@ -360,7 +451,6 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
     if (conversationHistory.length > 0) {
       try {
         sessionStorage.setItem('ai-conversation-history', JSON.stringify(conversationHistory));
-        console.log('Saved conversation history to session storage, messages count:', conversationHistory.length);
       } catch (error) {
         console.warn('Failed to save conversation history to session storage:', error);
       }
@@ -405,6 +495,178 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
     }
   };
 
+  // Save React code to backend
+  const saveReactCode = async () => {
+    if (!pageId || !effectiveProjectId || !currentCode) {
+      const missing = [];
+      if (!pageId) missing.push('pageId');
+      if (!effectiveProjectId) missing.push('projectId (both prop and URL extraction failed)');
+      if (!currentCode) missing.push('currentCode');
+      
+      toast.error(`Missing page information or code to save. Missing: ${missing.join(', ')}`);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      console.log('Saving React code:', { 
+        projectId: effectiveProjectId, 
+        pageId, 
+        codeLength: currentCode.length 
+      });
+      
+      // Try using the dedicated React code endpoint first
+      try {
+        const result = await projectService.saveReactCode(effectiveProjectId, pageId, currentCode);
+        console.log('React code saved successfully via dedicated endpoint:', result);
+        toast.success(`React code saved successfully! ${result.message}`);
+        return;
+      } catch (endpointError) {
+        console.warn('Dedicated endpoint failed, falling back to updatePage:', endpointError);
+        
+        // Fallback to general updatePage function
+        await updatePage(effectiveProjectId, pageId, { reactCode: currentCode });
+        console.log('React code saved successfully via updatePage fallback');
+        toast.success('React code saved successfully!');
+      }
+    } catch (error) {
+      console.error('Error saving React code:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`Failed to save React code: ${errorMessage}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Load last saved React code from backend
+  const loadLastSavedCode = async () => {
+    if (!pageId || !effectiveProjectId) {
+      const missing = [];
+      if (!pageId) missing.push('pageId');
+      if (!effectiveProjectId) missing.push('projectId (both prop and URL extraction failed)');
+      
+      toast.error(`Missing page information to load code. Missing: ${missing.join(', ')}`);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      console.log('Loading saved React code for:', { projectId: effectiveProjectId, pageId });
+      
+      // Try using the dedicated React code endpoint first
+      try {
+        const result = await projectService.getReactCode(effectiveProjectId, pageId);
+        console.log('Fetched React code via dedicated endpoint:', { 
+          hasReactCode: !!result.reactCode, 
+          codeLength: result.reactCode?.length || 0,
+          message: result.message
+        });
+        
+        if (result.reactCode && result.reactCode.trim()) {
+          // Save current code as previous before loading saved code
+          setPreviousCode(currentCode);
+          setHasCodeChanged(true);
+          
+          // Set the loaded code
+          setCurrentCode(result.reactCode);
+          
+          // Compile the loaded code
+          compileJSX(result.reactCode);
+          
+          if (onCodeUpdate) {
+            onCodeUpdate(result.reactCode);
+          }
+          
+          toast.success(`React code loaded successfully! ${result.message}`);
+          return;
+        } else {
+          toast('No saved React code found for this page', { icon: 'ℹ️' });
+          return;
+        }
+      } catch (endpointError) {
+        console.warn('Dedicated endpoint failed, falling back to direct API:', endpointError);
+      }
+      
+      // Fallback to direct API call
+      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+      if (token) {
+        try {
+          const response = await fetch(`http://localhost:5000/api/projects/${effectiveProjectId}/pages/${pageId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            const pageData = await response.json();
+            console.log('Fetched page data from API:', { 
+              hasReactCode: !!pageData.reactCode, 
+              codeLength: pageData.reactCode?.length || 0 
+            });
+            
+            if (pageData.reactCode && pageData.reactCode.trim()) {
+              // Save current code as previous before loading saved code
+              setPreviousCode(currentCode);
+              setHasCodeChanged(true);
+              
+              // Set the loaded code
+              setCurrentCode(pageData.reactCode);
+              
+              // Compile the loaded code
+              compileJSX(pageData.reactCode);
+              
+              if (onCodeUpdate) {
+                onCodeUpdate(pageData.reactCode);
+              }
+              
+              toast.success('Last saved React code loaded successfully!');
+              return;
+            }
+          } else {
+            console.warn('API request failed:', response.status, response.statusText);
+          }
+        } catch (apiError) {
+          console.warn('Direct API call failed, falling back to store:', apiError);
+        }
+      }
+      
+      // Final fallback to using projectStore
+      console.log('Falling back to projectStore.getPage');
+      const page = await getPage(effectiveProjectId, pageId);
+      console.log('Store page data:', { 
+        hasReactCode: !!page.reactCode, 
+        codeLength: page.reactCode?.length || 0 
+      });
+      
+      if (page.reactCode && page.reactCode.trim()) {
+        // Save current code as previous before loading saved code
+        setPreviousCode(currentCode);
+        setHasCodeChanged(true);
+        
+        // Set the loaded code
+        setCurrentCode(page.reactCode);
+        
+        // Compile the loaded code
+        compileJSX(page.reactCode);
+        
+        if (onCodeUpdate) {
+          onCodeUpdate(page.reactCode);
+        }
+        
+        toast.success('Last saved React code loaded successfully!');
+      } else {
+        toast('No saved React code found for this page', { icon: 'ℹ️' });
+      }
+    } catch (error) {
+      console.error('Error loading saved React code:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`Failed to load saved React code: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Start AI Conversation
   const startConversation = async () => {
     if (conversationId) {
@@ -426,7 +688,7 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
       const existingConversationId = savedConversationId && savedConversationId !== 'null' ? savedConversationId : undefined;
 
       console.log('Starting conversation with existing ID (if any):', existingConversationId);
-      const response = await aiService.startConversation(canvasState, 'react', existingConversationId);
+      const response = await aiService.startConversationWithEndpoints(canvasState, effectiveProjectId || '', 'react', existingConversationId);
       
       if (response.success) {
         setConversationId(response.threadId || response.conversationId); // Handle both threadId and legacy conversationId
@@ -436,33 +698,53 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
           // For restored sessions, we keep the existing code and conversation history
           // Don't overwrite current code as it might have user edits
         } else {
-          console.log('New conversation started, setting initial code');
-          // Save current code as previous before setting new code
-          setPreviousCode(currentCode);
-          setHasCodeChanged(true);
-          console.log('Setting initial code from AI conversation with threadId:', response.threadId || response.conversationId); // Debug logging
-          setCurrentCode(response.code);
-          // Note: compileJSX will be called automatically by useEffect when currentCode changes
+          console.log('New conversation started, AI generated initial code');
+          
+          // Instead of directly applying code, store it as pending changes for confirmation
+          setPendingAIChanges({
+            code: response.code,
+            explanation: 'I\'ve generated a React component based on your canvas design. Would you like to keep these changes or discard them?',
+            changes: ['Generated initial React component from canvas design']
+          });
+          setShowChangePreview(true);
           
           // Add initial message to conversation history
           setConversationHistory([{
             role: 'assistant',
-            content: 'I\'ve generated a React component based on your canvas design. You can now edit the code manually or ask me questions about it.',
+            content: 'I\'ve generated a React component based on your canvas design. Would you like to keep these changes or discard them?',
             timestamp: new Date(),
             type: 'code_update',
             code: response.code
           }]);
-
-          if (onCodeUpdate) {
-            onCodeUpdate(response.code);
-          }
         }
         
         setShowAIPanel(true);
       }
     } catch (error) {
       console.error('Failed to start conversation:', error);
-      alert('Failed to start AI conversation. Please check your internet connection and try again.');
+      console.log('Start conversation error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        error: error
+      });
+      
+      // Enhanced error message for user
+      let errorMessage = 'Failed to start AI conversation. ';
+      if (error instanceof Error) {
+        if (error.message.includes('fetch')) {
+          errorMessage += 'Network connection issue - please check your internet connection.';
+        } else if (error.message.includes('timeout')) {
+          errorMessage += 'Request timed out - please try again.';
+        } else if (error.message.includes('API')) {
+          errorMessage += 'AI service issue - please try again later.';
+        } else {
+          errorMessage += `Error: ${error.message}`;
+        }
+      } else {
+        errorMessage += 'Unknown error occurred - please try again.';
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setIsAIGenerating(false);
     }
@@ -511,9 +793,6 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
       };
       setConversationHistory(prev => [...prev, userMessage]);
 
-      console.log('Making API call to continue conversation...'); // Debug logging
-      console.log('Request payload:', { conversationId, enhancedMessage, currentCode, errors: currentErrors.length > 0 ? { compilation: compilationError || undefined, runtime: runtimeError || undefined } : undefined }); // Debug logging
-
       // Create canvas state for preservation
       const canvasState = {
         components: components,
@@ -521,27 +800,20 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
         theme: 'modern'
       };
 
-      const response = await aiService.continueConversation(
+      const response = await aiService.continueConversationWithEndpoints(
         conversationId, 
         enhancedMessage, 
-        currentCode,
+        currentCode, // This should always be the current actual code state
+        effectiveProjectId || '',
         currentErrors.length > 0 ? {
           compilation: compilationError || undefined,
           runtime: runtimeError || undefined
-        } : undefined,
-        canvasState // Pass canvas state for preservation
+        } : undefined
       );
-      
-      console.log('AI Service Response:', response); // Debug logging
-      console.log('Response success:', response.success, 'Response type:', response.type); // Debug logging
       
       if (response.success) {
         if (response.type === 'code_update') {
-          console.log('Processing code update response...'); // Debug logging
-          console.log('Code update response received:', response.code); // Debug logging
-          console.log('Auto-apply flag:', response.autoApply, 'Change type:', response.changeType); // Debug logging
-          
-          // AI provided updated code
+          // AI provided updated code - always ask for confirmation
           const currentErrors = [];
           if (compilationError) {
             currentErrors.push(`Compilation Error: ${compilationError}`);
@@ -550,71 +822,26 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
             currentErrors.push(`Runtime Error: ${runtimeError}`);
           }
           
-          // Auto-apply code if:
-          // 1. There were errors (existing behavior)
-          // 2. It's a simple style change (new behavior)
-          const shouldAutoApply = currentErrors.length > 0 || response.autoApply;
+          // Store pending changes for user confirmation
+          setPendingAIChanges({
+            code: response.code,
+            explanation: response.explanation,
+            changes: response.changes || []
+          });
+          setShowChangePreview(true);
           
-          if (shouldAutoApply) {
-            const reasonForAutoApply = currentErrors.length > 0 ? 'errors' : 'style change';
-            console.log(`Auto-applying ${reasonForAutoApply}:`, currentErrors.length > 0 ? currentErrors : 'simple style update'); // Debug logging
-            
-            // Save current code as previous before auto-applying
-            setPreviousCode(currentCode);
-            setHasCodeChanged(true);
-            
-            // Auto-apply the code
-            console.log('Setting new code from AI:', response.code); // Debug logging
-            setCurrentCode(response.code);
-            // Note: compileJSX will be called automatically by useEffect when currentCode changes
-            if (onCodeUpdate) {
-              onCodeUpdate(response.code);
-            }
-            
-            // Enable edit mode so user can see the applied changes
-            setIsCodeEditable(true);
-            
-            // Add to conversation history with auto-applied indicator
-            const autoApplyMessage = currentErrors.length > 0 
-              ? `✅ Auto-applied fix: ${response.explanation}`
-              : `✅ Auto-applied style change: ${response.explanation}`;
-              
-            setConversationHistory(prev => [...prev, {
-              role: 'assistant',
-              content: autoApplyMessage,
-              timestamp: new Date(),
-              type: 'code_update',
-              code: response.code,
-              explanation: response.explanation,
-              changes: response.changes
-            }]);
-            
-            // Clear any pending AI responses
-            setAiResponse(null);
-            setShowChangePreview(false);
-          } else {
-            // No errors, show preview for user confirmation
-            setAiResponse({
-              explanation: response.explanation,
-              enhancedCode: response.code,
-              changes: response.changes || []
-            });
-            setShowChangePreview(true);
-            
-            // Add to conversation history
-            setConversationHistory(prev => [...prev, {
-              role: 'assistant',
-              content: response.explanation,
-              timestamp: new Date(),
-              type: 'code_update',
-              code: response.code,
-              explanation: response.explanation,
-              changes: response.changes
-            }]);
-          }
+          // Add to conversation history
+          setConversationHistory(prev => [...prev, {
+            role: 'assistant',
+            content: response.explanation + "\n\nWould you like to keep these changes or discard them?",
+            timestamp: new Date(),
+            type: 'code_update',
+            code: response.code,
+            explanation: response.explanation,
+            changes: response.changes
+          }]);
         } else {
           // Conversational response only
-          console.log('Processing conversational response:', response.response); // Debug logging
           setConversationHistory(prev => [...prev, {
             role: 'assistant',
             content: response.response,
@@ -622,24 +849,43 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
             type: 'conversation'
           }]);
         }
-      } else {
-        console.error('AI response was not successful:', response); // Debug logging
       }
       
       setCustomPrompt('');
     } catch (error) {
       console.error('Failed to continue conversation:', error);
-      console.log('Error details:', error); // More detailed error logging
+      console.log('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        error: error
+      });
+      
+      // Enhanced error message for user
+      let errorMessage = 'Failed to get AI response. ';
+      if (error instanceof Error) {
+        if (error.message.includes('fetch')) {
+          errorMessage += 'Network connection issue - please check your internet connection.';
+        } else if (error.message.includes('timeout')) {
+          errorMessage += 'Request timed out - please try again.';
+        } else if (error.message.includes('API')) {
+          errorMessage += 'AI service issue - please try again later.';
+        } else {
+          errorMessage += `Error: ${error.message}`;
+        }
+      } else {
+        errorMessage += 'Unknown error occurred - please try again.';
+      }
       
       // Add error message to conversation history
       setConversationHistory(prev => [...prev, {
         role: 'assistant' as const,
-        content: `❌ Error: Failed to get AI response. Please check your internet connection and try again.`,
+        content: `❌ ${errorMessage}`,
         timestamp: new Date(),
         type: 'error_report' as const
       }]);
       
-      alert('Failed to continue conversation. Please check your internet connection and try again.');
+      // Show toast notification instead of alert
+      toast.error(errorMessage);
     } finally {
       setIsAIGenerating(false);
     }
@@ -690,9 +936,74 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
     setShowAIPanel(false);
   };
 
+  const handleKeepAIChanges = () => {
+    if (pendingAIChanges) {
+      // Save current code as previous before applying changes
+      setPreviousCode(currentCode);
+      setHasCodeChanged(true);
+      
+      // Apply the AI-generated code
+      setCurrentCode(pendingAIChanges.code);
+      
+      // Explicitly compile the new code
+      compileJSX(pendingAIChanges.code);
+      
+      if (onCodeUpdate) {
+        onCodeUpdate(pendingAIChanges.code);
+      }
+      
+      // Enable edit mode so user can see the applied changes
+      setIsCodeEditable(true);
+      
+      // Add confirmation to conversation history
+      setConversationHistory(prev => [...prev, 
+        {
+          role: 'user',
+          content: 'Keep changes',
+          timestamp: new Date(),
+          type: 'conversation'
+        },
+        {
+          role: 'assistant',
+          content: `Perfect! Changes applied successfully. This is now the current code for future modifications.`,
+          timestamp: new Date(),
+          type: 'conversation'
+        }
+      ]);
+      
+      // Don't sync in background - the currentCode state is updated and will be sent in next conversation
+      // syncCodeWithAI('applied', pendingAIChanges.code);
+      
+      // Clear pending changes
+      setPendingAIChanges(null);
+      setAiResponse(null);
+      setShowChangePreview(false);
+      
+      toast.success('AI changes applied successfully!');
+    }
+  };
+
+  const handleDiscardAIChanges = () => {
+    // Add only user action to conversation history
+    setConversationHistory(prev => [...prev, {
+      role: 'user',
+      content: 'Discard changes',
+      timestamp: new Date(),
+      type: 'conversation'
+    }]);
+    
+    // Clear pending changes
+    setPendingAIChanges(null);
+    setAiResponse(null);
+    setShowChangePreview(false);
+    
+    toast('AI changes discarded', { icon: 'ℹ️' });
+  };
+
   const handleDiscardChanges = () => {
     // Keep the current code unchanged
     setAiResponse(null);
+    setPendingAIChanges(null);
     setShowChangePreview(false);
     setShowAIPanel(false);
   };
@@ -758,12 +1069,31 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
               )}
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <div className="flex items-center space-x-2">
+            {/* Save/Load React Code Buttons */}
+            <button
+              onClick={saveReactCode}
+              disabled={isSaving}
+              className="flex items-center space-x-1 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              <span>{isSaving ? 'Saving...' : 'Save Code'}</span>
+            </button>
+            <button
+              onClick={loadLastSavedCode}
+              disabled={isLoading}
+              className="flex items-center space-x-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>{isLoading ? 'Loading...' : 'Reload Code'}</span>
+            </button>
+            <button 
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -771,10 +1101,14 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
           {/* Live Preview */}
           <div className="flex-1 flex flex-col">
             <div className="p-4 bg-gray-50 border-b border-gray-200">
-              <h3 className="text-sm font-medium text-gray-700">Live React Preview</h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Real-time compiled React components with hooks and state
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700">Live React Preview</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Real-time compiled React components with hooks and state
+                  </p>
+                </div>
+              </div>
             </div>
             
             <div className="flex-1 overflow-auto bg-gray-50 p-6">
@@ -1119,8 +1453,12 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
             )}
 
             {/* AI Response and Change Preview Panel */}
-            {showChangePreview && aiResponse && (
+            {showChangePreview && (aiResponse || pendingAIChanges) && (
               <div className="absolute top-16 right-4 z-50 bg-white rounded-lg shadow-2xl border border-gray-200 p-6 w-96 max-h-96 overflow-y-auto">
+                {/* Debug info */}
+                <div className="text-xs text-gray-500 mb-2">
+                  Debug: showChangePreview={showChangePreview.toString()}, hasPendingAI={!!pendingAIChanges}, hasAIResponse={!!aiResponse}
+                </div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900 flex items-center">
                     <Sparkles className="w-5 h-5 text-green-600 mr-2" />
@@ -1138,14 +1476,19 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
                   {/* AI Explanation */}
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <h4 className="font-medium text-blue-900 mb-2">AI Assistant says:</h4>
-                    <p className="text-sm text-blue-800">{aiResponse.explanation}</p>
+                    <p className="text-sm text-blue-800">
+                      {pendingAIChanges ? pendingAIChanges.explanation : aiResponse?.explanation}
+                    </p>
+                    <div className="mt-2 text-sm font-medium text-blue-900">
+                      Would you like to keep these changes or discard them?
+                    </div>
                   </div>
 
                   {/* Changes Made */}
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                     <h4 className="font-medium text-gray-900 mb-2">Changes Made:</h4>
                     <ul className="space-y-1">
-                      {aiResponse.changes.map((change, index) => (
+                      {(pendingAIChanges ? pendingAIChanges.changes : aiResponse?.changes || []).map((change, index) => (
                         <li key={index} className="text-sm text-gray-700 flex items-start">
                           <span className="text-green-600 mr-2">•</span>
                           {change}
@@ -1158,20 +1501,20 @@ const ReactSandbox: React.FC<ReactSandboxProps> = ({
                   <div className="bg-gray-900 rounded-lg p-3 max-h-32 overflow-y-auto">
                     <div className="text-xs text-gray-400 mb-2">Enhanced Code Preview:</div>
                     <pre className="text-xs text-green-400 font-mono">
-                      {aiResponse.enhancedCode.substring(0, 200)}...
+                      {(pendingAIChanges ? pendingAIChanges.code : aiResponse?.enhancedCode || '').substring(0, 200)}...
                     </pre>
                   </div>
 
                   {/* Action Buttons */}
                   <div className="flex space-x-3 pt-2">
                     <button
-                      onClick={handleKeepChanges}
+                      onClick={pendingAIChanges ? handleKeepAIChanges : handleKeepChanges}
                       className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                     >
                       <span>✓ Keep Changes</span>
                     </button>
                     <button
-                      onClick={handleDiscardChanges}
+                      onClick={pendingAIChanges ? handleDiscardAIChanges : handleDiscardChanges}
                       className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                     >
                       <span>✗ Discard</span>

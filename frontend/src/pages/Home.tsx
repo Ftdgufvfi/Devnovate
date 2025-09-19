@@ -1,8 +1,18 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Zap, Code, Palette, Database, Rocket, ArrowRight, Sparkles, Users, Github, Linkedin, Twitter } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
 
 const Home: React.FC = () => {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuthStore();
+
+  // Redirect authenticated users to projects
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/projects', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
   const features = [
     {
       icon: Palette,

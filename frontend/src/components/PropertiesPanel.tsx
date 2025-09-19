@@ -16,7 +16,7 @@ const PropertiesPanel: React.FC = () => {
     }
     
     return (
-      <div className="w-64 bg-white border-l border-gray-200 p-4">
+      <div className="h-full bg-white border-l border-gray-200 p-4">
         <h3 className="font-semibold text-gray-900 mb-4">Properties</h3>
         <div className="text-sm text-gray-500 text-center py-8">
           Select a component to edit its properties
@@ -622,7 +622,7 @@ const PropertiesPanel: React.FC = () => {
   };
 
   return (
-    <div className="w-64 bg-white border-l border-gray-200 h-full flex flex-col">
+    <div className="h-full bg-white border-l border-gray-200 flex flex-col">
       {/* Header */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between mb-3">

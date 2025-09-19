@@ -19,8 +19,24 @@ export interface Component {
 export interface Page {
   id: string;
   name: string;
+  slug: string;
+  endpoint: string;
+  title?: string;
+  description?: string;
   components: Component[];
   styles: Record<string, any>;
+  order: number;
+  isPublished: boolean;
+  // Code storage fields
+  reactCode?: string;
+  htmlCode?: string;
+  cssCode?: string;
+  canvasState?: any; // Store the canvas state as JSON
+  seoTitle?: string;
+  seoDescription?: string;
+  ogImage?: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Project {
@@ -28,10 +44,60 @@ export interface Project {
   name: string;
   description?: string;
   pages: Page[];
+  settings: {
+    theme?: string;
+    customCSS?: string;
+    favicon?: string;
+    domain?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
   isPublished: boolean;
   publishedUrl?: string;
+  userId?: string; // Add user ownership
+}
+
+// User Authentication Types
+export interface User {
+  _id: string;
+  username: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  avatar?: string;
+  isEmailVerified: boolean;
+  lastLogin?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface RegisterCredentials {
+  username: string;
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface AuthResponse {
+  success: boolean;
+  message: string;
+  user: User;
+  token: string;
 }
 
 export interface BackendModel {
